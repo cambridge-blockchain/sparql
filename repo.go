@@ -86,9 +86,9 @@ func (r *Repo) Query(q string) (*Results, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		b, err := ioutil.ReadAll(resp.Body)
+		b, err2 := ioutil.ReadAll(resp.Body)
 		var msg string
-		if err != nil {
+		if err2 != nil {
 			msg = "Failed to read response body"
 		} else {
 			if strings.TrimSpace(string(b)) != "" {
@@ -108,9 +108,29 @@ func (r *Repo) Query(q string) (*Results, error) {
 // Construct performs a SPARQL HTTP request to the Repo, and returns the
 // result triples.
 func (r *Repo) Construct(q string) ([]rdf.Triple, error) {
+	res, err := r.ConstructFormat(q, "text/turtle")
+	if err != nil {
+		return nil, err
+	}
+	dec := rdf.NewTripleDecoder(bytes.NewBufferString(res), rdf.Turtle)
+	return dec.DecodeAll()
+}
+
+// ConstructFormat performs a SPARQL HTTP request to the Repo, and returns the
+// result as string. It accepts as input one of the following Content-Type values:
+//    - text/turtle
+//    - application/n-quads
+//    - application/rdf+xml
+//    - application/trix
+//    - application/x-trig
+//    - text/rdf+n3
+//    - application/rdf+json
+//    - application/x-binary-rdf
+//    - text/plain
+func (r *Repo) ConstructFormat(q string, format string) (string, error) {
 	form := url.Values{}
 	form.Set("query", q)
-	form.Set("format", "text/turtle")
+	form.Set("format", format)
 	b := form.Encode()
 
 	req, err := http.NewRequest(
@@ -118,31 +138,31 @@ func (r *Repo) Construct(q string) ([]rdf.Triple, error) {
 		r.endpoint,
 		bytes.NewBufferString(b))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Content-Length", strconv.Itoa(len(b)))
-	req.Header.Set("Accept", "text/turtle")
+	req.Header.Set("Accept", format)
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		b, err := ioutil.ReadAll(resp.Body)
+		b, err2 := ioutil.ReadAll(resp.Body)
 		var msg string
-		if err != nil {
+		if err2 != nil {
 			msg = "Failed to read response body"
 		} else {
 			if strings.TrimSpace(string(b)) != "" {
 				msg = "Response body: \n" + string(b)
 			}
 		}
-		return nil, fmt.Errorf("Construct: SPARQL request failed: %s. "+msg, resp.Status)
+		return "", fmt.Errorf("Construct: SPARQL request failed: %s. "+msg, resp.Status)
 	}
-	dec := rdf.NewTripleDecoder(resp.Body, rdf.Turtle)
-	return dec.DecodeAll()
+	res, err := ioutil.ReadAll(resp.Body)
+	return string(res), err
 }
