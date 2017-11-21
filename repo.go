@@ -117,7 +117,7 @@ func (r *Repo) Construct(q string) ([]rdf.Triple, error) {
 }
 
 // ConstructFormat performs a SPARQL HTTP request to the Repo, and returns the
-// result as string. It accepts as input one of the following Content-Type values:
+// result as string. It accepts as input one of the following Accept header values:
 //    - text/turtle
 //    - application/n-quads
 //    - application/rdf+xml
@@ -127,10 +127,16 @@ func (r *Repo) Construct(q string) ([]rdf.Triple, error) {
 //    - application/rdf+json
 //    - application/x-binary-rdf
 //    - text/plain
-func (r *Repo) ConstructFormat(q string, format string) (string, error) {
+func (r *Repo) ConstructFormat(query string, format string) (string, error) {
 	form := url.Values{}
-	form.Set("query", q)
-	form.Set("format", format)
+
+	if strings.Contains(query, "INSERT") || strings.Contains(query, "DELETE") {
+		form.Set("request", query)
+	} else {
+		form.Set("query", query)
+		form.Set("format", format)
+	}
+
 	b := form.Encode()
 
 	req, err := http.NewRequest(
