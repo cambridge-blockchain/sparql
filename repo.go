@@ -17,17 +17,19 @@ import (
 // Repo represent a RDF repository, assumed to be
 // queryable via the SPARQL protocol over HTTP.
 type Repo struct {
-	endpoint string
 	client   *http.Client
+	dbType   string
+	endpoint string
 }
 
 // NewRepo creates a new representation of a RDF repository. It takes a
 // variadic list of functional options which can alter the configuration
 // of the repository.
-func NewRepo(addr string, options ...func(*Repo) error) (*Repo, error) {
+func NewRepo(addr string, dbType string, options ...func(*Repo) error) (*Repo, error) {
 	r := Repo{
-		endpoint: addr,
 		client:   http.DefaultClient,
+		dbType:   dbType,
+		endpoint: addr,
 	}
 	return &r, r.SetOption(options...)
 }
@@ -127,48 +129,87 @@ func (r *Repo) Construct(q string) ([]rdf.Triple, error) {
 //    - application/rdf+json
 //    - application/x-binary-rdf
 //    - text/plain
-func (r *Repo) ConstructFormat(query string, format string) (string, error) {
-	form := url.Values{}
+func (r *Repo) ConstructFormat(query string, format string) (response string, err error) {
+	var (
+		clientReq  *http.Request
+		clientRes  *http.Response
+		form       url.Values
+		buf        *bytes.Buffer
+		res        []byte
+		httpMethod string
+		reqURL     string
+	)
 
-	if strings.Contains(query, "INSERT") || strings.Contains(query, "DELETE") {
-		form.Set("request", query)
-	} else {
-		form.Set("query", query)
-		form.Set("format", format)
-	}
+	form = url.Values{}
 
-	b := form.Encode()
+	if r.dbType == "ontotext" {
+		if strings.Contains(query, "INSERT") || strings.Contains(query, "DELETE") {
+			form.Set("update", query)
 
-	req, err := http.NewRequest(
-		"POST",
-		r.endpoint,
-		bytes.NewBufferString(b))
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Content-Length", strconv.Itoa(len(b)))
-	req.Header.Set("Accept", format)
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, err2 := ioutil.ReadAll(resp.Body)
-		var msg string
-		if err2 != nil {
-			msg = "Failed to read response body"
+			httpMethod = "POST"
+			buf = bytes.NewBufferString(form.Encode())
 		} else {
-			if strings.TrimSpace(string(b)) != "" {
-				msg = "Response body: \n" + string(b)
-			}
+			form.Set("query", query)
+
+			httpMethod = "GET"
+			buf = bytes.NewBuffer(nil)
 		}
-		return "", fmt.Errorf("Construct: SPARQL request failed: %s. "+msg, resp.Status)
+
+		reqURL = fmt.Sprintf("%s?%s", r.endpoint, form.Encode())
+	} else if r.dbType == "oracle" {
+		if strings.Contains(query, "INSERT") || strings.Contains(query, "DELETE") {
+			form.Set("request", query)
+		} else {
+			form.Set("query", query)
+			form.Set("format", format)
+		}
+
+		httpMethod = "POST"
+		reqURL = r.endpoint
+		buf = bytes.NewBufferString(form.Encode())
+	} else {
+		return "", fmt.Errorf("Invalid database type: %s", r.dbType)
 	}
-	res, err := ioutil.ReadAll(resp.Body)
-	return string(res), err
+
+	if clientReq, err = http.NewRequest(httpMethod, reqURL, buf); err != nil {
+		return "", err
+	}
+
+	if r.dbType == "oracle" {
+		clientReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	clientReq.Header.Set("Content-Length", strconv.Itoa(len(form.Encode())))
+	clientReq.Header.Set("Accept", format)
+
+	if clientRes, err = r.client.Do(clientReq); err != nil {
+		return "", err
+	}
+
+	defer clientRes.Body.Close()
+
+	if clientRes.StatusCode < 200 || clientRes.StatusCode > 205 {
+		if res, err = ioutil.ReadAll(clientRes.Body); err != nil {
+			return "", fmt.Errorf(
+				"Construct: SPARQL request failed: %s. Failed to read response body",
+				clientRes.Status,
+			)
+		}
+
+		if strings.TrimSpace(string(res)) != "" {
+			return "", fmt.Errorf(
+				"Construct: SPARQL request failed: %s. Response body: \n %s",
+				clientRes.Status,
+				string(res),
+			)
+		}
+	}
+
+	if res, err = ioutil.ReadAll(clientRes.Body); err != nil {
+		return "", err
+	}
+
+	response = string(res)
+
+	return
 }
