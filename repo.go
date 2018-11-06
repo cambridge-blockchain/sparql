@@ -148,14 +148,14 @@ func (r *Repo) ConstructFormat(query string, format string) (response string, er
 
 			httpMethod = "POST"
 			buf = bytes.NewBufferString(form.Encode())
+			reqURL = r.endpoint
 		} else {
 			form.Set("query", query)
 
 			httpMethod = "GET"
 			buf = bytes.NewBuffer(nil)
+			reqURL = fmt.Sprintf("%s?%s", r.endpoint, form.Encode())
 		}
-
-		reqURL = fmt.Sprintf("%s?%s", r.endpoint, form.Encode())
 	} else if r.dbType == "oracle" {
 		if strings.Contains(query, "INSERT") || strings.Contains(query, "DELETE") {
 			form.Set("request", query)
@@ -175,9 +175,9 @@ func (r *Repo) ConstructFormat(query string, format string) (response string, er
 		return "", err
 	}
 
-	if r.dbType == "oracle" {
-		clientReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
+	// if r.dbType == "oracle" {
+	clientReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// }
 
 	clientReq.Header.Set("Content-Length", strconv.Itoa(len(form.Encode())))
 	clientReq.Header.Set("Accept", format)
